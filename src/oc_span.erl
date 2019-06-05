@@ -18,6 +18,7 @@
 -module(oc_span).
 
 -export([finish_span/2,
+         finish_span/3,
 
          put_attribute/3,
          put_attributes/2,
@@ -42,13 +43,19 @@
 %% @end
 %%--------------------------------------------------------------------
 -spec finish_span(opencensus:span_ctx(), maybe(opencensus:span())) -> true.
-finish_span(#span_ctx{tracestate=Tracestate}, Span=#span{}) ->
-    EndTime = wts:timestamp(),
+finish_span(SpanCtx, Ctx) ->
+    finish_span(SpanCtx, Ctx, ws:timestamp()).
+
+-spec finish_span(opencensus:span_ctx(), maybe(opencensus:span()), integer()) -> true.
+finish_span(SpanCtx, Ctx, undefined) ->
+    finish_span(SpanCtx, Ctx, wts:timestamp());
+
+finish_span(#span_ctx{tracestate=Tracestate}, Span=#span{}, EndTime) ->
     %% update tracestate to what the context has when finished
     Span1 = Span#span{end_time=EndTime,
                       tracestate=Tracestate},
     oc_reporter:store_span(Span1);
-finish_span(_, _) ->
+finish_span(_, _, _) ->
     true.
 
 %%--------------------------------------------------------------------

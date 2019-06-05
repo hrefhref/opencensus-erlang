@@ -33,6 +33,7 @@
          start_span/3,
 
          finish_span/1,
+         finish_span/2,
 
          is_enabled/1,
 
@@ -147,30 +148,34 @@ start_span(Name, SpanCtx, Options) ->
     %% TODO: support overriding the sampler
     _Sampler = maps:get(sampler, Options, undefined),
 
-    SpanCtx1 = new_span_(Name, SpanCtx, Kind, RemoteParent),
+    SpanCtx1 = new_span_(Name, SpanCtx, Kind, RemoteParent, Options),
     put_attributes(Attributes, SpanCtx1),
     SpanCtx1.
 
+new_span_(Name, Span, Kind, RemoteParent) ->
+    new_span_(Name, Span, Kind, RemoteParent, []).
+
 %% if parent is undefined, first run sampler
-new_span_(Name, undefined, Kind, _) ->
+new_span_(Name, undefined, Kind, _, Options) ->
     TraceId = opencensus:generate_trace_id(),
     Span = #span_ctx{trace_id=TraceId,
                      trace_options=0},
     TraceOptions = update_trace_options(should_sample, Span),
-    new_span_(Name, Span#span_ctx{trace_options=TraceOptions}, Kind, false);
+    new_span_(Name, Span#span_ctx{trace_options=TraceOptions}, Kind, false, Options);
 %% if parent is remote, first run sampler
-new_span_(Name, Span=#span_ctx{}, Kind, RemoteParent) when RemoteParent =:= true ->
+new_span_(Name, Span=#span_ctx{}, Kind, RemoteParent, Options) when RemoteParent =:= true ->
     TraceOptions = update_trace_options(should_sample, Span),
-    new_span_(Name, Span#span_ctx{trace_options=TraceOptions}, Kind, false);
+    new_span_(Name, Span#span_ctx{trace_options=TraceOptions}, Kind, false, Options);
 new_span_(Name, Parent=#span_ctx{trace_id=TraceId,
                                  trace_options=TraceOptions,
                                  tracestate=Tracestate,
-                                 span_id=ParentSpanId}, Kind, _RemoteParent) when ?IS_ENABLED(TraceOptions) ->
+                                 span_id=ParentSpanId}, Kind, _RemoteParent, Options) when ?IS_ENABLED(TraceOptions) ->
     SpanId = opencensus:generate_span_id(),
+    StartTime = maps:get(start_time, Options, wts:timestamp()),
     Span = #span{trace_id=TraceId,
                  span_id=SpanId,
                  tracestate=Tracestate,
-                 start_time=wts:timestamp(),
+                 start_time=StartTime,
                  parent_span_id=ParentSpanId,
                  kind=Kind,
                  name=Name,
@@ -178,7 +183,7 @@ new_span_(Name, Parent=#span_ctx{trace_id=TraceId,
     ets:insert(?SPAN_TAB, Span),
 
     Parent#span_ctx{span_id=SpanId};
-new_span_(_Name, Parent, _Kind, _RemoteParent) ->
+new_span_(_Name, Parent, _Kind, _RemoteParent, _Options) ->
     SpanId = opencensus:generate_span_id(),
     %% if discarded by sampler, create no span
     Parent#span_ctx{span_id=SpanId}.
@@ -200,16 +205,21 @@ update_trace_options(should_sample, #span_ctx{trace_id=TraceId,
 %% @end
 %%--------------------------------------------------------------------
 -spec finish_span(maybe(opencensus:span_ctx())) -> boolean().
+finish_span(SpanCtx) ->
+    finish_span(SpanCtx, undefined).
+
+-spec finish_span(maybe(opencensus:span_ctx()), integer()) -> boolean().
 finish_span(SpanCtx=#span_ctx{span_id=SpanId,
-                              trace_options=TraceOptions}) when ?IS_ENABLED(TraceOptions) ->
+                              trace_options=TraceOptions}, EndTime) when ?IS_ENABLED(TraceOptions) ->
     case ets:take(?SPAN_TAB, SpanId) of
         [SpanData] ->
-            oc_span:finish_span(SpanCtx, SpanData);
+            oc_span:finish_span(SpanCtx, SpanData, EndTime);
         _ ->
             false
     end;
-finish_span(_) ->
+finish_span(_, _) ->
     true.
+
 
 %%--------------------------------------------------------------------
 %% @doc
